@@ -1,3 +1,3 @@
-allprojects {
-    apply(plugin = "com.github.ben-manes.versions")
+plugins {
+    alias(libs.plugins.versions)
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/fish
 
-argparse 'amend' -- $argv
+argparse 'no-verify' 'amend' 's/sentry' -- $argv
 
 function modules --inherit _flag_amend
   if set -q _flag_amend
@@ -16,7 +16,7 @@ function modules --inherit _flag_amend
         else if test "$parts[1]" = "odoo" && test "$parts[2]" = "addons" && set -q parts[3] && not contains $parts[3] $modules
           set -a modules $parts[3]
         end
-      case 'enterprise'
+      case 'enterprise' 'design-themes'
         if set -q parts[1] && not contains $parts[1] $modules
           set -a modules $parts[1]
         end
@@ -33,10 +33,10 @@ function modules --inherit _flag_amend
 end
 
 function parse_ticket_id
-  string match -rq 'opw-(?P<id>\d+)' $argv[1] && echo $id || echo TODO
+  string match -rq '(?:opw|sentry)-(?P<id>\d+)' $argv[1] && echo $id || echo TODO
 end
 
-function opw
+function id
   parse_ticket_id (git rev-parse --abbrev-ref HEAD)
 end
 
@@ -45,12 +45,11 @@ function msg
   set -a parts "Steps to reproduce"\n"=================="
   set -a parts "Cause of the issue"\n"=================="
   set -a parts Solution\n========
-  set -a parts opw-(opw)
+  set -q _flag_sentry && set -a parts sentry-(id) || set -a parts opw-(id)
   string join \n\n $parts
 end
 
-if set -q _flag_amend
-  git commit --amend -eF (msg | psub)
-else
-  git commit -eF (msg | psub)
-end
+set -q _flag_no_verify && set -a flags --no-verify
+set -q _flag_amend && set -a flags --amend
+
+git commit $flags -eF (msg | psub)

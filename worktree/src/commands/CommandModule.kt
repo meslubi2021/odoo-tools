@@ -1,8 +1,11 @@
 package com.github.hubvd.odootools.worktree.commands
 
-import org.kodein.di.*
+import org.kodein.di.DI
+import org.kodein.di.bindSet
+import org.kodein.di.new
+import org.kodein.di.singleton
 
-val commandModule = DI.Module("command") {
+val COMMAND_MODULE = DI.Module("command") {
     bindSet {
         add { singleton { new(::AddCommand) } }
         add { singleton { new(::CurrentCommand) } }

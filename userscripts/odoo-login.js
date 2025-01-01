@@ -2,15 +2,17 @@
 // @name        Login odoo admin/demo
 // @match       https://*.runbot*.odoo.com/web/login
 // @match       https://*.runbot*.odoo.com/*/web/login
-// @match       http://localhost:8069/web/login
-// @match       http://localhost:8069/*/web/login
+// @match       http://localhost:*/web/login
+// @match       http://localhost:*/*/web/login
+// @match       http://127.*.*.*:*/web/login
+// @match       http://127.*.*.*:*/*/web/login
 // @grant       none
 // @version     1.0
 // @author      hubvd
 // ==/UserScript==
 
 window.addEventListener('load', () => {
-  const login = document.querySelector('button[type="submit"]')
+  const login = document.querySelector('.oe_login_form button[type="submit"]')
   for (let text of ['admin', 'demo', 'portal']) {
     const el = document.createElement('button')
     el.innerText = text

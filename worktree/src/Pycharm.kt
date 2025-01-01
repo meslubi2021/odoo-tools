@@ -4,6 +4,8 @@ import com.github.hubvd.odootools.workspace.Workspace
 import org.redundent.kotlin.xml.Node
 import org.redundent.kotlin.xml.PrintOptions
 import org.redundent.kotlin.xml.xml
+import java.nio.file.FileAlreadyExistsException
+import java.nio.file.StandardOpenOption
 import kotlin.io.path.createDirectories
 import kotlin.io.path.div
 import kotlin.io.path.writeText
@@ -16,17 +18,17 @@ private infix fun String.eq(value: Any) {
     }
 }
 
-class Pycharm(private val workspace: Workspace, private val repositories: List<Repository>) {
+class Pycharm(private val workspace: Workspace) {
     private fun generateIml() = xml("module") {
         includeXmlProlog = true
         attribute("type", "PYTHON_MODULE")
         attribute("version", "4")
         "component"("name" to "NewModuleRootManager") {
             "content"("url" to "file://\$MODULE_DIR\$") {
-                repositories.forEach { repo ->
+                odooRepositories().forEach { repo ->
                     "sourceFolder"(
                         "url" to "file://\$MODULE_DIR\$/${repo.pathName}",
-                        "isTestSource" to "false"
+                        "isTestSource" to "false",
                     )
                 }
                 "excludeFolder"("url" to "file://\$MODULE_DIR\$/venv")
@@ -40,7 +42,7 @@ class Pycharm(private val workspace: Workspace, private val repositories: List<R
             "default" to "false",
             "name" to "remote debugger",
             "type" to "PyRemoteDebugConfigurationType",
-            "factoryName" to "Python Remote Debug"
+            "factoryName" to "Python Remote Debug",
         ) {
             "module"("name" to workspace.name)
             "PORT" eq 10000
@@ -65,19 +67,19 @@ class Pycharm(private val workspace: Workspace, private val repositories: List<R
                     "IssueNavigationLink" {
                         "option"("name" to "issueRegexp", "value" to "(?i)(opw|task)[\\W\\-]*(?:id)?[\\W-]*(\\d+)")
                         "option"(
-                            "name" to "issueRegexp",
-                            "value" to "https://www.odoo.com/web#view_type=form&amp;model=project.task&amp;id=\$2"
+                            "name" to "linkRegexp",
+                            "value" to "https://www.odoo.com/web#view_type=form&amp;model=project.task&amp;id=\$2",
                         )
                     }
                     "IssueNavigationLink" {
                         "option"("name" to "issueRegexp", "value" to "odoo/(.*)#(\\d+)")
-                        "option"("name" to "issueRegexp", "value" to "https://github.com/odoo/\$1/pull/\$2")
+                        "option"("name" to "linkRegexp", "value" to "https://github.com/odoo/\$1/pull/\$2")
                     }
                 }
             }
         }
         "component"("name" to "VcsDirectoryMappings") {
-            repositories.forEach { repo ->
+            odooRepositories().forEach { repo ->
                 "mapping"("directory" to "\$PROJECT_DIR\$/${repo.pathName}", "vcs" to "Git")
             }
         }
@@ -142,8 +144,12 @@ class Pycharm(private val workspace: Workspace, private val repositories: List<R
         }.map { workspace.path / ".idea" / it.first to it.second }.toList()
         generators.map { it.first.parent }.toHashSet().forEach { it.createDirectories() }
         generators.forEach { (path, generator) ->
-            path.writeText(generator().toString(PrintOptions(indent = "  ")))
+            try {
+                path.writeText(
+                    generator().toString(PrintOptions(indent = "  ")),
+                    options = arrayOf(StandardOpenOption.CREATE_NEW),
+                )
+            } catch (_: FileAlreadyExistsException) {}
         }
     }
-
 }

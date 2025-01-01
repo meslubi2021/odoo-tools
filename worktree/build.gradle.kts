@@ -1,7 +1,7 @@
 plugins {
     id("cli-application")
-    @Suppress("DSL_SCOPE_VIOLATION") // TODO: Remove once KTIJ-19369 is fixed
     alias(libs.plugins.kotlinx.plugin.serialization)
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 cli {

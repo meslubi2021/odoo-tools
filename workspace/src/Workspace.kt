@@ -1,27 +1,42 @@
 package com.github.hubvd.odootools.workspace
 
+import com.github.hubvd.odootools.config.Config
 import com.github.hubvd.odootools.config.ShellPath
 import com.github.hubvd.odootools.workspace.WorkspaceFormat.*
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.kodein.di.DI
 import org.kodein.di.bind
 import org.kodein.di.instance
 import org.kodein.di.singleton
-import java.nio.file.NoSuchFileException
-import java.nio.file.Path
-import java.nio.file.attribute.BasicFileAttributes
-import kotlin.io.path.*
-import kotlinx.serialization.json.Json as Jsonx
+import kotlin.io.path.Path
+import kotlin.io.path.div
+import kotlin.io.path.readText
+import java.nio.file.Path as NioPath
 
 @Serializable
-data class WorkspaceConfig(val root: ShellPath, val default: String)
+data class WorkspaceConfig(
+    val root: ShellPath,
+    val default: String,
+    val odooToolsPath: ShellPath = Path(System.getProperty("user.home"), "odoo-tools"),
+)
 
-@Serializable
-data class Workspace(val name: String, val path: ShellPath) {
-
+interface Workspace {
+    val name: String
+    val path: NioPath
     val version: Float
     val base: String
 
+    companion object {
+        operator fun invoke(name: String, path: NioPath): Workspace = WorkspaceImpl(name, path)
+    }
+}
+
+internal data class WorkspaceImpl(override val name: String, override val path: ShellPath) : Workspace {
+
+    override val version: Float
+    override val base: String
     init {
         val release = readRelease()
         version = release.first
@@ -30,13 +45,14 @@ data class Workspace(val name: String, val path: ShellPath) {
 
     private fun readRelease(): Pair<Float, String> {
         val txt = (path / "odoo/odoo/release.py").readText()
-        val (major, minor, level) = versionRe.find(txt)!!.destructured
+        val (major, minor, level) = VERSION_RE.find(txt)!!.destructured
         val majorNumber = major.removePrefix("saas~")
         val version = "$majorNumber.$minor".toFloat()
-        val base = if (level != "FINAL")
+        val base = if (level != "FINAL") {
             "master"
-        else
+        } else {
             "${major.replace('~', '-')}.$minor"
+        }
         return version to base
     }
 
@@ -45,50 +61,9 @@ data class Workspace(val name: String, val path: ShellPath) {
     }
 
     companion object {
-        private val versionRe =
+        private val VERSION_RE =
             """version_info = ?\(['"]?((?:saas~)?\d+)['"]?,\s*(\d+),\s*\d+,\s*([A-Z]+)""".toRegex()
     }
-
-}
-
-class Workspaces(private val config: WorkspaceConfig) {
-    private fun listWorktrees(repository: Path): List<Path> {
-        val dotGit = repository / ".git"
-        val attributes = try {
-            dotGit.readAttributes<BasicFileAttributes>()
-        } catch (e: NoSuchFileException) {
-            error("Repo $repository does not exists")
-        }
-        val mainRepository = when {
-            attributes.isRegularFile -> Path(
-                dotGit.readText().trimEnd().removePrefix("gitdir: ")
-            ).parent.parent.parent
-
-            attributes.isDirectory -> repository
-            else -> error("???")
-        }
-        val worktrees = (mainRepository / ".git/worktrees").toFile().listFiles() ?: emptyArray()
-        return buildList(capacity = worktrees.size + 1) {
-            add(mainRepository)
-            worktrees.forEach {
-                Path((it.toPath() / "gitdir").readText().trimEnd())
-                    .takeIf { it.exists() }
-                    ?.parent
-                    ?.let { add(it) }
-            }
-        }
-    }
-
-    fun list() = listWorktrees(config.root / config.default / "odoo")
-        .filter { it.name == "odoo" }
-        .map { it.parent }
-        .map { Workspace(it.name, it) }
-        .sortedBy { it.name.removePrefix("saas-") }
-
-    fun default() = list().find { it.name == config.default }!!
-
-    fun current() = Path(System.getProperty("user.dir")).let { cwd -> list().find { cwd.startsWith(it.path) } }
-
 }
 
 enum class WorkspaceFormat { Name, Version, Path, Base, Json, Fish }
@@ -98,7 +73,12 @@ fun Workspace.format(format: WorkspaceFormat): String = when (format) {
     Version -> version.toString()
     Path -> path.toString()
     Base -> base
-    Json -> Jsonx.encodeToString(Workspace.serializer(), this)
+    Json -> buildJsonObject {
+        put("version", version)
+        put("name", name)
+        put("path", path.toString())
+        put("base", base)
+    }.toString()
     Fish -> buildString {
         for ((name, value) in arrayOf(
             "version" to version,
@@ -115,6 +95,6 @@ fun Workspace.format(format: WorkspaceFormat): String = when (format) {
     }
 }
 
-val workspaceModule = DI.Module("workspace") {
-    bind { singleton { Workspaces(instance()) } }
+val WORKSPACE_MODULE = DI.Module("workspace") {
+    bind { singleton { instance<Config>().get("workspace", WorkspaceConfig.serializer()) } }
 }

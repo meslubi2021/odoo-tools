@@ -1,6 +1,7 @@
 package com.github.hubvd.odootools.config
 
 import com.akuleshov7.ktoml.Toml
+import com.akuleshov7.ktoml.TomlInputConfig
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -9,11 +10,16 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import org.kodein.di.DI
+import org.kodein.di.bind
+import org.kodein.di.singleton
 import java.nio.file.Path
 import kotlin.io.path.Path
 import kotlin.io.path.readText
 
-typealias ShellPath = @Serializable(PathSerializer::class) Path
+typealias ShellPath =
+    @Serializable(PathSerializer::class)
+    Path
 
 object PathSerializer : KSerializer<Path> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("Path", PrimitiveKind.STRING)
@@ -25,15 +31,28 @@ object PathSerializer : KSerializer<Path> {
                 value.startsWith("~/") -> value.replaceRange(0..1, System.getProperty("user.home") + "/")
                 value == "~" -> System.getProperty("user.home")
                 else -> value
-            }
+            },
         )
     }
 }
 
-object Config {
-    private val content = Path(System.getProperty("user.home"), ".config/odoo/config.toml").readText()
+interface Config {
+    fun <T> get(section: String, deserializer: DeserializationStrategy<T>): T
+}
 
-    fun <T> get(section: String, deserializer: DeserializationStrategy<T>): T {
-        return Toml.partiallyDecodeFromString(deserializer, content, section)
+private object TomlConfig : Config {
+    private val CONTENT = Path(System.getProperty("user.home"), ".config/odoo/config.toml").readText()
+
+    override fun <T> get(section: String, deserializer: DeserializationStrategy<T>): T {
+        return Toml.partiallyDecodeFromString(
+            deserializer,
+            CONTENT,
+            section,
+            TomlInputConfig(ignoreUnknownNames = true),
+        )
     }
+}
+
+val CONFIG_MODULE by DI.Module {
+    bind<Config>() with singleton { TomlConfig }
 }

@@ -1,0 +1,38 @@
+{
+  results: search(
+    type: ISSUE
+    query: "<QUERY>"
+    last: 100
+  ) {
+    prs: nodes {
+      ... on PullRequest {
+        id: number
+        title
+        headRefName
+        baseRefName
+        url
+        isDraft
+        mergeable
+        body: bodyText
+        labels(first: 10) {
+          nodes {
+            name
+          }
+        }
+        commits(last: 1) {
+          nodes {
+            commit {
+              status {
+                contexts {
+                  state
+                  targetUrl
+                  context
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

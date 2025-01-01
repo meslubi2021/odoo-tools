@@ -15,7 +15,6 @@ fun pythonProvider(): PythonProvider {
     val systemPaths = System.getenv("PATH").split(':').map { Path(it) }
 
     fun findExe(paths: List<Path>, exe: String) = paths
-        .toHashSet()
         .asSequence()
         .map { it / exe }
         .filter { it.exists() }
@@ -27,8 +26,8 @@ fun pythonProvider(): PythonProvider {
 }
 
 class SystemPythonProvider : PythonProvider {
-    context(ProcessSequenceDslContext) override suspend fun installOrGetVersion(version: String) =
-        Path(capture("which", "python3").first().trim())
+    context(ProcessSequenceDslContext)
+    override suspend fun installOrGetVersion(version: String) = Path(capture("which", "python3").first().trim())
 }
 
 class PyenvPythonProvider(private val path: Path) : PythonProvider {

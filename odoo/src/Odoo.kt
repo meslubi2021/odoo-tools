@@ -1,25 +1,27 @@
 package com.github.hubvd.odootools.odoo
 
+import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.mordant.terminal.Terminal
-import com.github.hubvd.odootools.config.Config
+import com.github.hubvd.odootools.config.CONFIG_MODULE
+import com.github.hubvd.odootools.odoo.actions.ActionProvider
+import com.github.hubvd.odootools.odoo.actions.ActionProviderImpl
+import com.github.hubvd.odootools.odoo.commands.CompleteCommand
 import com.github.hubvd.odootools.odoo.commands.LaunchCommand
-import com.github.hubvd.odootools.workspace.WorkspaceConfig
-import com.github.hubvd.odootools.workspace.Workspaces
+import com.github.hubvd.odootools.workspace.WORKSPACE_MODULE
+import com.github.hubvd.odootools.workspace.WorkspaceProvider
 import com.github.pgreze.process.Redirect
 import com.github.pgreze.process.process
 import kotlinx.coroutines.runBlocking
-import org.kodein.di.DI
-import org.kodein.di.bind
-import org.kodein.di.instance
-import org.kodein.di.singleton
+import org.kodein.di.*
 import java.net.URLEncoder
-import kotlin.io.path.div
-import kotlin.io.path.isDirectory
+import kotlin.io.path.*
+import kotlin.math.absoluteValue
+import kotlin.math.roundToInt
 import kotlin.system.exitProcess
 
-fun LaunchCommand.computes() {
+val computes: ContextGenerator.() -> Unit = {
     effect {
-        if ("drop" in flags && "database" in options) {
+        if (drop && database != null) {
             val count = runBlocking {
                 process(
                     "psql",
@@ -28,16 +30,17 @@ fun LaunchCommand.computes() {
                     select count(*)
                     from pg_stat_activity
                     where backend_type = 'client backend'
-                    and datname = '${options["database"]}'
+                    and datname = '$database'
                     """.trimIndent(),
                     "odoo",
-                    stdout = Redirect.CAPTURE, stderr = Redirect.SILENT
+                    stdout = Redirect.CAPTURE,
+                    stderr = Redirect.SILENT,
                 ).output.firstOrNull()?.trim()?.toIntOrNull() ?: 0
             }
 
             if (count == 0) {
                 runBlocking {
-                    process("dropdb", options["database"]!!, stdout = Redirect.SILENT, stderr = Redirect.SILENT)
+                    process("dropdb", database!!, stdout = Redirect.SILENT, stderr = Redirect.SILENT)
                 }
             } else {
                 println("database is in use")
@@ -49,19 +52,46 @@ fun LaunchCommand.computes() {
     option("limit-time-cpu") { "99999" }
     option("limit-time-real") { "99999" }
 
-    depends("test-tags", "test-qunit") {
-        flag("test-enable") { "test-tags" in options || "test-qunit" in options }
+    depends("database") {
+        option("http-port") {
+            when {
+                workspace.name == workspace.base && database == workspace.name -> {
+                    (workspace.version * 100).roundToInt()
+                }
+
+                workspace.name == workspace.base && database == "${workspace.name}-test" -> {
+                    (workspace.version * 100 + 5).roundToInt()
+                }
+
+                else -> {
+                    val min = 2000
+                    val max = 65535
+                    (min + database.hashCode().absoluteValue % (max - min + 1))
+                }
+            }.let {
+                when (it) {
+                    1720 -> 1721 // reserved port..
+                    else -> it
+                }
+            }.toString()
+        }
+    }
+
+    depends("test-tags", "test-qunit", "test-file") {
+        flag("test-enable") { testTags != null || testQunit != null || testFile != null }
     }
 
     depends("test-qunit", "test-tags", "addons-path") {
         option("init") {
-            if ("test-qunit" in options) return@option "qunit"
-            val testTags = options["test-tags"] ?: return@option null
+            if (testQunit != null) return@option "qunit"
+            val testTags = testTags ?: return@option null
             testTags
                 .splitToSequence(',')
                 .filter { !it.startsWith('-') }
-                .flatMap { TestTag(it).toAddons(workspace, options["addons-path"]) }
+                .flatMap { TestTag(it).toAddons(workspace, addonsPath) }
+                .toHashSet()
                 .joinToString(",")
+                .takeUnless { it.isEmpty() }
         }
     }
 
@@ -69,59 +99,70 @@ fun LaunchCommand.computes() {
         option("addons-path") {
             buildList {
                 add("odoo/addons")
-                if ("community" !in flags && (workspace.path / "enterprise").isDirectory()) {
-                    add("enterprise")
+                if (!community) add("enterprise")
+                if (themes) add("design-themes")
+                val customAddonsPath = config.odooToolsPath / "addons"
+                val home = Path(System.getProperty("user.home"))
+                if (customAddonsPath.startsWith(home)) {
+                    add("~/" + customAddonsPath.relativeTo(home))
+                } else {
+                    add(customAddonsPath)
                 }
-                add("~/odoo-tools/addons")
             }.joinToString(",")
         }
     }
 
     env("QUNIT_FILTER") {
-        val testTags = options["test-qunit"] ?: return@env null
+        val testTags = testQunit ?: return@env null
         URLEncoder.encode(testTags, "utf-8")
     }
 
     env("QUNIT_MOBILE") {
-        if ("mobile" in flags) "1" else null
+        if (mobile) "1" else null
     }
 
     env("QUNIT_WATCH") {
-        if ("watch" in flags) "1" else null
+        if (watch) "1" else null
+    }
+
+    env("STEP_DELAY") {
+        stepDelay?.toIntOrNull()?.toString()
     }
 
     env("ODOO_WORKSPACE") {
         workspace.path.toString()
     }
 
+    env("ODOO_DEBUG") {
+        if (debug) "1" else null
+    }
+
     depends("test-qunit", "mobile") {
         option("test-tags") {
             when {
-                "test-qunit" in options && "mobile" in flags -> "/qunit:WebSuiteMobile"
-                "test-qunit" in options -> "/qunit:WebSuite"
+                testQunit != null && mobile -> "/qunit:WebSuiteMobile"
+                testQunit != null -> "/qunit:WebSuite"
                 else -> null
             }
         }
     }
 
     depends("test-enable") {
-        flag("stop-after-init") { "test-enable" in flags }
-        option("log-level") { if ("test-enable" in flags) "test" else null }
-        option("max-cron-thread") { if ("test-enable" in flags) "0" else null }
-        option("http-port") { if ("test-enable" in flags) "9000" else null }
-        option("database") { if ("test-enable" in flags) "${workspace.name}-test" else workspace.name }
+        flag("stop-after-init") { testEnable }
+        option("log-level") { if (testEnable) "test" else null }
+        option("max-cron-thread") { if (testEnable) "0" else null }
+        option("database") { if (testEnable) "${workspace.name}-test" else workspace.name }
+        option("log-handler") { if (testEnable) "werkzeug:ERROR" else null }
     }
-
 }
 
-fun main(args: Array<String>) {
-    val di = DI {
-        bind { singleton { LaunchCommand(instance(), instance()) } }
-        bind { singleton { Terminal() } }
-        bind { singleton { Workspaces(instance()) } }
-        bind { singleton { Config.get("workspace", WorkspaceConfig.serializer()) } }
-    }
-
-    val command by di.instance<LaunchCommand>()
-    command.main(args)
+internal val ODOO_MODULE by DI.Module {
+    bind { singleton { new(::LaunchCommand).subcommands(new(::CompleteCommand)) } }
+    bind { singleton { Terminal() } }
+    import(WORKSPACE_MODULE)
+    import(CONFIG_MODULE)
+    bind { singleton { new(::WorkspaceProvider).cached() } }
+    bind<ActionProvider> { singleton { ActionProviderImpl() } }
 }
+
+fun main(args: Array<String>) = DI { import(ODOO_MODULE) }.direct.instance<LaunchCommand>().main(args)
