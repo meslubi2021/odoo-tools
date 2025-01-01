@@ -1,8 +1,36 @@
 #!/bin/fish
 
-set local_branch (git rev-parse --abbrev-ref HEAD)
-
-if contains "$local_branch" (workspace -lv)
-  echo "Can't commit to $local_branch" 2>&1
+function fail
+  echo $argv 2>&1
   exit 1
 end
+
+function check_branch
+  if test "$(worktree base)" = "$(git rev-parse --abbrev-ref HEAD)"
+    fail "Can't commit to a base branch"
+  end
+end
+
+set staged_files (
+  git status --porcelain |
+  string match -rg '^[AMRDC]+\s+(.*)$'
+)
+
+function fail_with_pattern -a glob -a pattern -a flags
+  set files (string match $glob -- $staged_files) || return
+  set matches (rg -l --no-config $flags "$pattern" $files)
+  and fail "Found `$pattern` in $matches"
+end
+
+function check_debugger
+  fail_with_pattern "*.js" "debugger"
+end
+
+function check_qunit
+  fail_with_pattern "*/static/tests/*.js" "QUnit\s*\.\s*(debug|only)" -U
+end
+
+for check in qunit branch debugger
+  check_$check
+end
+
